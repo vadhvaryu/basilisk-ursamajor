@@ -1,0 +1,1 @@
+This "basilisk-ursamajor" repository is the main platform for the NewSpace@Berkeley | URSA Major astrodynamics project for the Fall 2025-Spring 2026 period. Basilisk is downloaded as a submodule within this repository, so everyone should be working off the same version at all times. 
