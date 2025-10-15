@@ -2,7 +2,6 @@ alabaster==1.0.0
 babel==2.17.0
 bokeh==3.7.2
 breathe==4.36.0
-git+https://github.com/AVSLab/basilisk.git@056ebed619f83ebfd9cc915a3336966df444d972#egg=bsk&subdirectory=basilisk
 certifi==2025.10.5
 cfgv==3.4.0
 charset-normalizer==3.4.3
