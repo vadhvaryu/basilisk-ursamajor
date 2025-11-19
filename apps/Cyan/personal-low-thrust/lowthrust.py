@@ -11,11 +11,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 
-# Add Basilisk to path (adjust as needed for your installation)
-# repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-# basilisk_path = os.path.join(repo_root, "basilisk")
-# if basilisk_path not in sys.path:
-#     sys.path.append(basilisk_path)
+# Add Basilisk to path - REQUIRED FOR BASILISK TO BE FOUND
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+sys.path.insert(0, os.path.join(repo_root, "dist3", "Basilisk"))
+sys.path.insert(0, repo_root)
 
 # Basilisk imports
 from Basilisk.utilities import SimulationBaseClass
@@ -77,16 +76,19 @@ def run_leo_to_geo_transfer(show_plots=True):
     
     # --------------------------------------------------------
     # Create simulation container
+    # --------------------------------------------------------
     scSim = SimulationBaseClass.SimBaseClass()
     
     # --------------------------------------------------------
     # Create simulation process and task
+    # --------------------------------------------------------
     dynProcess = scSim.CreateNewProcess("dynamicsProcess")
     simulationTimeStep = macros.sec2nano(TIME_STEP)
     dynProcess.addTask(scSim.CreateNewTask("dynamicsTask", simulationTimeStep))
     
     # --------------------------------------------------------
     # Create spacecraft object
+    # --------------------------------------------------------
     scObject = spacecraft.Spacecraft()
     scObject.ModelTag = "spacecraft"
     
@@ -107,6 +109,7 @@ def run_leo_to_geo_transfer(show_plots=True):
     
     # --------------------------------------------------------
     # Setup gravity body (Earth)
+    # --------------------------------------------------------
     gravFactory = simIncludeGravBody.gravBodyFactory()
     earth = gravFactory.createEarth()
     earth.isCentralBody = True
@@ -119,6 +122,7 @@ def run_leo_to_geo_transfer(show_plots=True):
     
     # --------------------------------------------------------
     # Setup thruster
+    # --------------------------------------------------------
     thrusterSet = thrusterDynamicEffector.ThrusterDynamicEffector()
     thrusterSet.ModelTag = "thrusterDynamics"
     
@@ -141,6 +145,7 @@ def run_leo_to_geo_transfer(show_plots=True):
     
     # --------------------------------------------------------
     # Setup data logging
+    # --------------------------------------------------------
     numDataPoints = 1000000
     samplingTime = simulationTimeStep
     scLog = scObject.scStateOutMsg.recorder(samplingTime)
@@ -148,10 +153,12 @@ def run_leo_to_geo_transfer(show_plots=True):
     
     # --------------------------------------------------------
     # Initialize simulation
+    # --------------------------------------------------------
     scSim.InitializeSimulation()
     
     # --------------------------------------------------------
     # MAIN SIMULATION LOOP
+    # --------------------------------------------------------
     print("Starting simulation...")
     print(f"Initial altitude: {ALT_LEO/1000:.1f} km")
     print(f"Target altitude: {ALT_GEO/1000:.1f} km")
@@ -234,6 +241,7 @@ def run_leo_to_geo_transfer(show_plots=True):
     
     # --------------------------------------------------------
     # POST-PROCESSING AND ANALYSIS
+    # --------------------------------------------------------
     print("\n" + "="*60)
     print("SIMULATION COMPLETE")
     print("="*60)
@@ -273,6 +281,7 @@ def run_leo_to_geo_transfer(show_plots=True):
     
     # --------------------------------------------------------
     # PLOTTING
+    # --------------------------------------------------------
     if show_plots:
         # Get full trajectory from logged data
         r_logged = scLog.r_BN_N
@@ -318,6 +327,7 @@ def run_leo_to_geo_transfer(show_plots=True):
 
 # ============================================================
 # RUN SIMULATION
+# ============================================================
 
 if __name__ == "__main__":
     run_leo_to_geo_transfer(show_plots=True)
