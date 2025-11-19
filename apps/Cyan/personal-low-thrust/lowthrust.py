@@ -12,9 +12,27 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 
 # Add Basilisk to path - REQUIRED FOR BASILISK TO BE FOUND
-repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-sys.path.insert(0, os.path.join(repo_root, "dist3", "Basilisk"))
-sys.path.insert(0, repo_root)
+# Option 1: Automatic path detection
+current_dir = os.path.dirname(os.path.abspath(__file__))
+documents_root = os.path.abspath(os.path.join(current_dir, "../../../.."))
+basilisk_path = os.path.join(documents_root, "basilisk", "dist3", "Basilisk")
+
+# Option 2: If automatic doesn't work, uncomment and use hardcoded path:
+# basilisk_path = r"C:\Users\Coral14\Documents\basilisk\dist3\Basilisk"
+
+# Add to Python path
+sys.path.insert(0, basilisk_path)
+sys.path.insert(0, os.path.dirname(basilisk_path))
+
+print(f"Looking for Basilisk at: {basilisk_path}")
+print(f"Path exists: {os.path.exists(basilisk_path)}")
+
+if not os.path.exists(basilisk_path):
+    print("\nERROR: Basilisk not found!")
+    print("Please check if this path exists on your system:")
+    print(f"  {basilisk_path}")
+    print("\nIf not, uncomment Option 2 above and set the correct path.")
+    sys.exit(1)
 
 # Basilisk imports
 from Basilisk.utilities import SimulationBaseClass
