@@ -1,9 +1,8 @@
 """
-Scenario: Nonimpulsive low-thrust LEO -> GEO transfer
-- 1 thruster along velocity
-- Stop thrust at GEO radius
-- Coast for 2 weeks and analyze orbit
-+ graphs trajectory 
+Scenario: Nonimpulsive low-thrust LEO -> GEO transfer using Basilisk 2.8.19
+- Single thruster firing opposite to velocity direction (forward thrust)
+- Stop thrust when reaching GEO radius
+- Coast for 2 weeks to verify orbit stability
 """
 
 import sys
@@ -20,11 +19,9 @@ from matplotlib.patches import Circle
 
 # Basilisk imports
 from Basilisk.utilities import SimulationBaseClass
-from Basilisk.utilities import unitTestSupport
 from Basilisk.utilities import macros
 from Basilisk.simulation import spacecraft
 from Basilisk.simulation import thrusterDynamicEffector
-from Basilisk.simulation import gravityEffector
 from Basilisk.utilities import simIncludeGravBody
 from Basilisk import __path__
 
@@ -32,6 +29,7 @@ bskPath = __path__[0]
 
 # ============================================================
 # INITIAL PARAMETERS
+# ============================================================
 
 # Gravitational parameter and Earth radius
 MU_EARTH = 3.986004418e14  # m^3/s^2
@@ -59,6 +57,7 @@ MAX_SIM_TIME = 3.0 * 365 * 24 * 3600.0  # 3 years safety limit
 
 # ============================================================
 # HELPER FUNCTIONS
+# ============================================================
 
 def unit_vector(vec):
     """Return unit vector in direction of vec"""
@@ -69,19 +68,24 @@ def unit_vector(vec):
 
 # ============================================================
 # MAIN SCENARIO FUNCTION
+# ============================================================
 
 def run_leo_to_geo_transfer(show_plots=True):
     """
     Simulate low-thrust transfer from LEO to GEO with coast phase
     """
+    
+    # --------------------------------------------------------
     # Create simulation container
     scSim = SimulationBaseClass.SimBaseClass()
     
+    # --------------------------------------------------------
     # Create simulation process and task
     dynProcess = scSim.CreateNewProcess("dynamicsProcess")
     simulationTimeStep = macros.sec2nano(TIME_STEP)
     dynProcess.addTask(scSim.CreateNewTask("dynamicsTask", simulationTimeStep))
     
+    # --------------------------------------------------------
     # Create spacecraft object
     scObject = spacecraft.Spacecraft()
     scObject.ModelTag = "spacecraft"
@@ -118,19 +122,15 @@ def run_leo_to_geo_transfer(show_plots=True):
     thrusterSet = thrusterDynamicEffector.ThrusterDynamicEffector()
     thrusterSet.ModelTag = "thrusterDynamics"
     
-    # Create 1 thruster, with center of mass pointing in x-direction initially
-    thFactory = simIncludeGravBody.thrusterFactory()
-    thFactory.create(
-        'TH1',
-        [0, 0, 0],  # Location at center of mass
-        [1, 0, 0],  # Direction (will be updated each timestep)
-        MaxThrust=MAX_THRUST,
-        steadyIsp=ISP
-    )
+    # Create single thruster manually
+    thConfig = thrusterDynamicEffector.THRSimConfig()
+    thConfig.thrLoc_B = [[0.0], [0.0], [0.0]]  # Location at COM
+    thConfig.thrDir_B = [[1.0], [0.0], [0.0]]  # Direction (will be updated each timestep)
+    thConfig.MaxThrust = MAX_THRUST  # Newtons
+    thConfig.steadyIsp = ISP  # seconds
     
     # Add thruster to effector
-    for key, th in thFactory.thrusterList.items():
-        thrusterSet.addThruster(th)
+    thrusterSet.addThruster(thConfig)
     
     # Link thruster to spacecraft mass depletion
     thrusterSet.linkInStates(scObject.scStateOutMsg)
