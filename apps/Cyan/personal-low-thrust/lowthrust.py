@@ -12,331 +12,323 @@ from matplotlib.patches import Circle
 
 # Basilisk imports
 from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion
-from Basilisk.simulation import spacecraft
-from Basilisk.utilities import simIncludeThruster, simIncludeGravBody
+from Basilisk.simulation import spacecraft, svIntegrators
+from Basilisk.utilities import simIncludeThruster, simIncludeGravBody, unitTestSupport
 from Basilisk.architecture import messaging
 
-# === Initial parameters ===
-mu = 3.986004418e14         # Earth mu (m^3/s^2)
-R_E = 6.378e6               # Earth radius (m)
-g0 = 9.80665                # m/s^2
+# ---------------- INITIAL PARAMETERS ----------------
+# Physical constants
+mu = 3.986004418e14       # Earth mu (m^3/s^2)
+R_E = 6.378e6             # Earth radius (m)
+g0 = 9.80665              # m/s^2
 
-alt_init = 500e3            # 500 km LEO
-r_LEO = R_E + alt_init      # Total radius (Earth + LEO)
+# Initial orbit (500 km LEO)
+alt_init = 500e3            # m
+r_LEO = R_E + alt_init      # total radius of orbit
 v_LEO = np.sqrt(mu / r_LEO)
 
-alt_GEO = 35_786e3          # GEO altitude
-r_GEO = R_E + alt_GEO       # GEO radius (~42,164 km from Earth's center)
+# GEO target (35,786 km altitude)
+alt_GEO = 35_786e3          # m
+r_GEO = R_E + alt_GEO       # total radius of orbit
 
-m0 = 1000.0                 # initial spacecraft mass (kg)
+# Spacecraft
+m0 = 1000.0               # kg
 
-T_max = 1.0                 # N
-Isp = 10000.0               # s
+# Engine parameters 
+T_max = 1.0               # N input (max thrust)
+I_sp = 10_000.0           # s 
+# print I_sp to confirm
+print(f"Using Isp = {I_sp} s (copied from your reference script)")
 
-# integration / task timestep
-dt = 10.0                   #s s
+# Integration / task timestep
+dt = 10.0                 # seconds (task step)
 taskRate = macros.sec2nano(dt)
 
-# coast duration after thrust ends (2 weeks)
+# Coast duration
 coast_duration = 14 * 24 * 3600.0  # 2 weeks in seconds
 
-# safety max simulation seconds (big number)
-safety_max = 365 * 24 * 3600.0 * 3.0  # 3 years
+# Safety
+safety_max = 3.0 * 365.0 * 24.0 * 3600.0  # 3 years in seconds
 
-
+# ---------------- helper functions ----------------
 def unit(vec):
     n = np.linalg.norm(vec)
-    return vec / n if n > 1e-12 else np.array([1.0, 0.0, 0.0])      # accounts for 0 velocity (cannot divide by 0)
-
+    return vec / n if n > 1e-12 else np.array([1.0, 0.0, 0.0])
 
 def semi_major_axis(r_vec, v_vec, mu_val=mu):
     r = np.linalg.norm(r_vec)
     v = np.linalg.norm(v_vec)
-    # specific orbital energy: eps = v^2/2 - mu/r ; a = -mu/(2*eps) = 1/(2/r - v^2/mu)
     return 1.0 / (2.0 / r - v * v / mu_val)
 
+# ---------------- Build Basilisk sim ----------------
+def run_basilisk_rk4(show_plots=True):
 
-def run_basilisk_lowthrust():
+    # create simulation base
+    scSim = SimulationBaseClass.SimBaseClass()
 
-    # --- Build simulation base ---
-    sim = SimulationBaseClass.SimBaseClass()
+    # process + task
+    simProcessName = "simProcess"
+    simTaskName = "simTask"
+    dynProcess = scSim.CreateNewProcess(simProcessName)
+    dynProcess.addTask(scSim.CreateNewTask(simTaskName, taskRate))
 
-    # Create a process and task for dynamics
-    procName = "dynProcess"
-    taskName = "dynTask"
-    sim.CreateNewProcess(procName)
-    sim.CreateNewTask(procName, taskName, taskRate)
-
-    # --- Spacecraft module (translational only) ---
-    scObject = spacecraft.SpacecraftState()
+    # create spacecraft (use full Spacecraft object so we can set integrator)
+    scObject = spacecraft.Spacecraft()
     scObject.ModelTag = "spacecraft"
     scObject.hub.mHub = m0
 
-    # initial inertial position & velocity (N-frame)
+    # initial inertial states (N-frame)
     scObject.hub.r_CN_NInit = [r_LEO, 0.0, 0.0]
     scObject.hub.v_CN_NInit = [0.0, v_LEO, 0.0]
 
-    # add spacecraft to the dynamics task
-    sim.AddModelToTask(taskName, scObject)
+    # attach RK4 integrator to spacecraft
+    rk4 = svIntegrators.svIntegratorRK4(scObject)
+    scObject.setIntegrator(rk4)
 
-    # --- Central gravity (Earth) ---
+    # add spacecraft to task
+    scSim.AddModelToTask(simTaskName, scObject)
+
+    # gravity body factory and attach Earth (central body)
     gravFactory = simIncludeGravBody.gravBodyFactory()
     earth = gravFactory.createEarth()
-    # attach Earth as the central gravity body to spacecraft's gravField
+    earth.isCentralBody = True
+    # attach gravity bodies to simulation (Basilisk helper)
     try:
-        scObject.gravField.gravBodies = [earth]
+        gravFactory.addBodiesTo(scObject)
     except Exception:
+        # fallback attach if helper differs
         try:
-            scObject.gravField = simIncludeGravBody.gravFactoryGravField([earth])
+            scObject.gravField.gravBodies = [earth]
         except Exception:
             pass
 
-    # --- Thruster creation (single thruster) ---
-    # Use simIncludeThruster helper to build a thruster device.
+    # --- Create single thruster using simIncludeThruster ---
     thrusterName = "lowThrust"
+    thruster_objs = simIncludeThruster.create(
+        thrusterType="CST",
+        r_B=[0.0, 0.0, 0.0],
+        tHat_B=[1.0, 0.0, 0.0],
+        maxThrust=T_max,
+        isp=I_sp,
+        baseName=thrusterName,
+    )
 
-    # Place thruster at the body origin; assuming no rotation of spacecraft
-    thruster_objs = simIncludeThruster.create(thrusterType='CST',
-                                              r_B=[0.0, 0.0, 0.0],
-                                              tHat_B=[1.0, 0.0, 0.0],
-                                              maxThrust=T_max,
-                                              isp=Isp,
-                                              baseName=thrusterName)
-
-    # simIncludeThruster.create sometimes returns a list or dict; if list chose first entry, if not list assume returned object is thruster device.
-    thr_device = None
+    # select thruster device and effector depending on helper return format
     if isinstance(thruster_objs, (list, tuple)) and len(thruster_objs) > 0:
         thr_device = thruster_objs[0]
     else:
         thr_device = thruster_objs
 
-    # --- Thruster effector: attach to spacecraft ---
-    # Different versions of Basilisk place effector in different places, so have to locate
-    # First checks thruster_objs[-1] is effector
-    # Next check thruster device has field .effector
-    # If neither true, None (prevents crashing)    
+    # try retrieve effector (common API places the effector on the last element or on the device)
     thrusterEffector = None
-    # try first/second attributes
     try:
-        thrusterEffector = thruster_objs[-1].effector  # sometimes last item
+        thrusterEffector = thruster_objs[-1].effector
     except Exception:
         try:
-            if hasattr(thr_device, 'effector'):
+            if hasattr(thr_device, "effector"):
                 thrusterEffector = thr_device.effector
         except Exception:
             thrusterEffector = None
 
-    # If can't find effector, try finding in global namespace created by simIncludeThruster
-    if thrusterEffector is None:
+    # attach effector to spacecraft (if found) and add to task
+    if thrusterEffector is not None:
+        try:
+            scObject.addDynamicEffector(thrusterEffector)
+            scSim.AddModelToTask(simTaskName, thrusterEffector)
+        except Exception:
+            # some helper already registered the effector
+            pass
+    else:
+        # try attach device as effector (older helpers)
         try:
             scObject.addDynamicEffector(thr_device)
         except Exception:
-            # if addDynamicEffector doesn't exist, ignore
-            pass
-    else:
-        try:
-            scObject.addDynamicEffector(thrusterEffector)
-            sim.AddModelToTask(taskName, thrusterEffector)
-        except Exception:
             pass
 
-    # Add thruster device to the sim task if not already added - some helpers do this automatically
+    # Add thruster device to task (if helper requires it)
     try:
-        sim.AddModelToTask(taskName, thr_device)
+        scSim.AddModelToTask(simTaskName, thr_device)
     except Exception:
-        # ignore if device cannot be directly added (some versions handle device internally)
         pass
 
-    # --- Build thruster command message (DoubleVec) ---
+    # --- Build and connect thrust command message (DoubleVec) ---
     nThrusters = 1
     thrustFactorPayload = messaging.DoubleVecPayload()
     thrustFactorPayload.vec = [0.0] * nThrusters
     thrustFactorMsg = messaging.DoubleVecMsg().write(thrustFactorPayload)
 
-    # Attach or store the command message where the effector expects it.
-    # 1) If the effector object has a named input 'thrusterCmdInMsg', subscribe to our message.
+    # If effector exists, subscribe our message (defensive)
     try:
         thrusterEffector.thrusterCmdInMsg.subscribeTo(thrustFactorMsg)
     except Exception:
-        # 2) If effector has a 'thrustFactorInMsg' or 'thrusterCmd' attribute, try writing to it directly later
         try:
-            thrusterEffector.thrustFactor = [0.0] * nThrusters
+            thrusterEffector.thrustFactorInMsg.subscribeTo(thrustFactorMsg)
         except Exception:
+            # fallback - we'll attempt to set attribute directly later
             pass
 
-    # --- Setup history logging lists ---
-    pos_hist = []
-    vel_hist = []
-    mass_hist = []
-    time_hist = []
+    # --- Setup recorder for spacecraft state (scStateOutMsg) ---
+    try:
+        stateLog = scObject.scStateOutMsg.recorder()
+        scSim.AddModelToTask(simTaskName, stateLog)
+    except Exception:
+        # fallback: some versions may use transStateOutMsg
+        try:
+            stateLog = scObject.transStateOutMsg.recorder()
+            scSim.AddModelToTask(simTaskName, stateLog)
+        except Exception:
+            stateLog = None
 
-    # --- Initialize states for manual stepping ---
-    # initial inertial r & v
-    r_N = np.array([r_LEO, 0.0, 0.0])
-    v_N = np.array([0.0, v_LEO, 0.0])
-    mass = m0
+    # Initialize the sim
+    scSim.InitializeSimulation()
 
-    # Pre-calc mass flow for full thrust
-    mdot_full = T_max / (Isp * g0)
+    # Logging arrays
+    r_hist = []
+    v_hist = []
+    m_hist = []
+    t_hist = []
 
-    # Initialize and start the sim
-    sim.InitializeSimulation()
-
+    # Local shadow state for read/write when needed
+    # (we will rely on Basilisk to update these, reading from scObject whenever possible)
     thrusting = True
     thrust_end_time = None
     t_sim = 0.0
     step = 0
-    max_steps = int(min(safety_max / dt, 10_000_000))  # safe cap
+    max_steps = int(min(safety_max / dt, 50_000_000))
 
-    # MAIN STEP LOOP: update thruster command each dt, advance Basilisk one step, read state
+    # ---- MAIN LOOP: step by dt, command thrust, read back states from Basilisk ----
     while step < max_steps:
 
-        a_current = semi_major_axis(r_N, v_N, mu)
+        # Read latest state from scObject if available
+        try:
+            scState = scObject.scStateOutMsg.read()
+            r_N = np.array(scState.r_BN_N)   # meters
+            v_N = np.array(scState.v_BN_N)   # m/s
+            mass = scObject.hub.mHub
+        except Exception:
+            # fallback: try transStateOutMsg
+            try:
+                trans = scObject.transStateOutMsg.read()
+                r_N = np.array(trans.r_BN_N)
+                v_N = np.array(trans.v_BN_N)
+                mass = scObject.hub.mHub
+            except Exception:
+                # If messages not available yet, read from hub initial fields
+                r_N = np.array(scObject.hub.r_CN_NInit)
+                v_N = np.array(scObject.hub.v_CN_NInit)
+                mass = scObject.hub.mHub
 
-        # Decide whether to thrust: continue while semi-major axis < target GEO radius
-        if thrusting and a_current >= r_GEO:
+        # compute semi-major axis and check for cutoff: stop when radius reaches GEO
+        r_mag = np.linalg.norm(r_N)
+        if thrusting and r_mag >= r_GEO:
             thrusting = False
             thrust_end_time = t_sim
-            print("Thrust phase complete at t = {:.1f} s ({:.3f} days)".format(t_sim, t_sim / 86400.0))
+            # send a thrustFactor = 0 to turn thruster off
+            try:
+                payload = messaging.DoubleVecPayload()
+                payload.vec = [0.0]
+                tf_msg = messaging.DoubleVecMsg().write(payload)
+                thrusterEffector.thrusterCmdInMsg.write(tf_msg)
+            except Exception:
+                try:
+                    thrusterEffector.thrustFactor = [0.0]
+                except Exception:
+                    pass
+            print(f"Thrust cutoff: radius reached GEO at t = {t_sim:.1f} s ({t_sim/86400.0:.4f} days)")
+            # don't break yet — we'll now enter coast and run for coast_duration
 
-        # Build thrustFactor command and set thruster orientation to align thrust with inertial +v direction
+        # If still thrusting, compute inertial thrust direction (along +v to push spacecraft forward)
         if thrusting:
             v_hat = unit(v_N)
-            # We want the thruster to *push the spacecraft forward*, so thrust vector points along +v_hat.
-            # Update thruster device orientation (API differs by version)
+            # set thruster device direction (body==inertial assumption)
             try:
                 thr_device.tHat_B = [float(v_hat[0]), float(v_hat[1]), float(v_hat[2])]
             except Exception:
                 try:
                     thr_device.thrDirection = [float(v_hat[0]), float(v_hat[1]), float(v_hat[2])]
                 except Exception:
-                    # if we can't set it, it's likely the helper will compute thrust direction from commanded vector; ignore
                     pass
-
-            thrust_factor = [1.0]
-        else:
-            thrust_factor = [0.0]
-
-        # Attempt to publish the thrustFactor message to the effector input.
-        # Use 'try' because different versions of Basilisk accept different interfaces.
-        try:
-            payload = messaging.DoubleVecPayload()
-            payload.vec = thrust_factor
-            tf_msg = messaging.DoubleVecMsg().write(payload)
-            # try expect .thrusterCmdInMsg.write(msg)
+            # publish thrustFactor = 1.0
             try:
+                payload = messaging.DoubleVecPayload()
+                payload.vec = [1.0]
+                tf_msg = messaging.DoubleVecMsg().write(payload)
                 thrusterEffector.thrusterCmdInMsg.write(tf_msg)
             except Exception:
-                # some effectors expect a direct write to an input message attribute
                 try:
-                    thrusterEffector.thrustFactorInMsg.write(tf_msg)
+                    thrusterEffector.thrustFactor = [1.0]
                 except Exception:
-                    # fallback: set attribute directly (if available)
-                    try:
-                        thrusterEffector.thrustFactor = thrust_factor
-                    except Exception:
-                        pass
-        except Exception:
-            # if messaging construction failed, try setting an attribute directly
+                    pass
+        else:
+            # ensure thruster off
             try:
-                thrusterEffector.thrustFactor = thrust_factor
+                payload = messaging.DoubleVecPayload()
+                payload.vec = [0.0]
+                tf_msg = messaging.DoubleVecMsg().write(payload)
+                thrusterEffector.thrusterCmdInMsg.write(tf_msg)
             except Exception:
-                pass
-
-        # Advance Basilisk one task step
-        try:
-            sim.SingleStep()
-        except Exception:
-            # Some Basilisk versions require ProcessModelQueue and then SingleStep
-            try:
-                sim.ProcessModelQueue(taskName)
-                sim.SingleStep()
-            except Exception:
-                # if not, try calling ExecuteSimulation for a tiny dt window
                 try:
-                    sim.ConfigureStopTime(macros.nanoseconds_to_seconds(taskRate))  # may not exist in all versions
+                    thrusterEffector.thrustFactor = [0.0]
                 except Exception:
                     pass
 
-        # Read back spacecraft translational output message
-        # Check common message name: transStateOutMsg, scStateOutMsg
-        r_read = None
-        v_read = None
-        mass_read = None
+        # Advance the simulation one step (RK4 integrator inside Basilisk will be used)
+        # Use SingleStep loop for fine control (many Basilisk examples use ExecuteSimulation for long runs)
         try:
-            trans = scObject.transStateOutMsg.read()
-            # many transStateOutMsg objects have .r_BN_N and .v_BN_N
-            r_read = np.array(trans.r_BN_N)
-            v_read = np.array(trans.v_BN_N)
-            # spacecraft mass often stored in hub.mHub
-            mass_read = scObject.hub.mHub
+            scSim.SingleStep()
+        except Exception:
+            # Some Basilisk builds require ProcessModelQueue + SingleStep
+            try:
+                scSim.ProcessModelQueue(simTaskName)
+                scSim.SingleStep()
+            except Exception:
+                # last-resort: Execute for dt window
+                scSim.ConfigureStopTime(macros.sec2nano(t_sim + dt))
+                scSim.ExecuteSimulation()
+
+        # Read back updated state from message
+        try:
+            scState = scObject.scStateOutMsg.read()
+            r_N = np.array(scState.r_BN_N)
+            v_N = np.array(scState.v_BN_N)
+            mass = scObject.hub.mHub
         except Exception:
             try:
-                scst = scObject.scStateOutMsg.read()
-                r_read = np.array(scst.r_BN_N)
-                v_read = np.array(scst.v_BN_N)
-                mass_read = scObject.hub.mHub
+                trans = scObject.transStateOutMsg.read()
+                r_N = np.array(trans.r_BN_N)
+                v_N = np.array(trans.v_BN_N)
+                mass = scObject.hub.mHub
             except Exception:
-                # As fallback, keep using local integration
-                r_read = r_N
-                v_read = v_N
-                mass_read = mass
+                # if read fails, continue with previous values (unlikely in a working Basilisk setup)
+                pass
 
-        # If the thruster effector didn't update the translational states (because the helper didn't wire), do Euler update by hand:
-        # Compute gravity
-        rmag = np.linalg.norm(r_N)
-        a_grav = -mu * r_N / rmag**3
+        # log
+        r_hist.append(r_N.copy())
+        v_hist.append(v_N.copy())
+        m_hist.append(mass)
+        t_hist.append(t_sim)
 
-        # If thruster active, compute thrust acceleration in inertial frame and update v_N and mass
-        if thrusting:
-            vmag = np.linalg.norm(v_N)
-            if vmag > 1e-12:
-                # thrust acceleration along v_hat
-                a_thrust = (T_max / mass) * (v_N / vmag)
-                v_N = v_N + (a_grav + a_thrust) * dt
-            else:
-                v_N = v_N + a_grav * dt
-            # mass update
-            mass = mass - mdot_full * dt
-            mass = max(0.0, mass)
-        else:
-            # coast
-            v_N = v_N + a_grav * dt
-
-        r_N = r_N + v_N * dt
-
-        # overwrite r_read and v_read with our integrated state to keep logging consistent
-        r_read = r_N.copy()
-        v_read = v_N.copy()
-        mass_read = mass
-
-        # logging
-        pos_hist.append(r_read.copy())
-        vel_hist.append(v_read.copy())
-        mass_hist.append(mass_read)
-        time_hist.append(t_sim)
-
-        # increment time
+        # time increment
         t_sim += dt
         step += 1
 
-        # stop condition: finished coast after thrust_end_time
+        # if thrusting ended earlier, wait to finish coast period
         if (not thrusting) and (thrust_end_time is not None) and (t_sim >= thrust_end_time + coast_duration):
-            print("Finished coast phase at t = {:.1f} s ({:.3f} days)".format(t_sim, t_sim / 86400.0))
+            print(f"Finished coast at t = {t_sim:.1f} s ({t_sim/86400.0:.4f} days)")
             break
 
-        # safety stop
+        # safety
         if t_sim >= safety_max:
-            print("Safety stop reached at t = {:.1f} s".format(t_sim))
+            print("Safety stop reached.")
             break
 
-    # Convert logs to numpy arrays
-    r_hist = np.array(pos_hist)
-    v_hist = np.array(vel_hist)
-    t_hist = np.array(time_hist)
-    m_hist = np.array(mass_hist)
+    # convert logs to arrays
+    r_hist = np.array(r_hist)
+    v_hist = np.array(v_hist)
+    t_hist = np.array(t_hist)
+    m_hist = np.array(m_hist)
 
-    # Coast analysis on last coast_duration window
+    # coast analysis on last coast_duration interval
     coast_steps = int(coast_duration / dt)
     if coast_steps > len(r_hist):
         coast_steps = len(r_hist)
@@ -346,41 +338,36 @@ def run_basilisk_lowthrust():
     r_apo = np.max(r_last)
     ecc = (r_apo - r_per) / (r_apo + r_per) if (r_apo + r_per) != 0 else 0.0
     r_avg = 0.5 * (r_apo + r_per)
-    rel_err_percent = (r_avg - r_GEO) / r_GEO * 100.0
+    rel_err_pct = (r_avg - r_GEO) / r_GEO * 100.0
 
-    print("\n--- Summary ---")
-    print("Initial altitude (km): {:.3f}".format((r_LEO - R_E) / 1e3))
-    print("Target GEO altitude (km): {:.3f}".format(alt_GEO / 1e3))
-    print("Final mass (kg): {:.3f}".format(mass))
-    print("Perigee after coast (km): {:.3f}".format((r_per - R_E) / 1e3))
-    print("Apogee  after coast (km): {:.3f}".format((r_apo - R_E) / 1e3))
-    print("Eccentricity after coast: {:.6f}".format(ecc))
-    print("Avg radius error vs GEO: {:.6f} %".format(rel_err_percent))
+    # Print summary
+    print("\n=== Summary ===")
+    print(f"Initial altitude (km): {(r_LEO - R_E)/1e3:.3f}")
+    print(f"Target GEO altitude (km): {alt_GEO/1e3:.3f}")
+    print(f"Final mass (kg): {mass:.3f}")
+    print(f"Perigee after coast (km): {(r_per - R_E)/1e3:.3f}")
+    print(f"Apogee after coast  (km): {(r_apo - R_E)/1e3:.3f}")
+    print(f"Eccentricity after coast: {ecc:.6f}")
+    print(f"Avg radius error vs GEO: {rel_err_pct:.6f} %")
 
-    # --- Plot results 2D ---
-    thrust_end_idx = max(0, len(t_hist) - coast_steps)
-    fig, ax = plt.subplots(figsize=(10, 10))
-    ax.set_aspect('equal')
-    ax.axis('off')
-
-    ax.add_patch(Circle((0, 0), R_E, fc='C0', ec='none'))
-    ax.annotate("Earth", xy=(0, 0), ha='center', va='center', color='white')
-
-    # GEO circle
-    theta = np.linspace(0, 2 * np.pi, 400)
-    ax.plot(r_GEO * np.cos(theta), r_GEO * np.sin(theta), '--', lw=1.5, label='GEO radius')
-
-    # plot trajectory
-    ax.plot(r_hist[:thrust_end_idx, 0], r_hist[:thrust_end_idx, 1], lw=1, label='Thrust phase')
-    ax.plot(r_hist[thrust_end_idx:, 0], r_hist[thrust_end_idx:, 1], lw=1, label='Coast phase')
-
-    # mark start and thrust end
-    ax.scatter(r_hist[0, 0], r_hist[0, 1], color='g', label='Start')
-    ax.scatter(r_hist[thrust_end_idx, 0], r_hist[thrust_end_idx, 1], color='k', label='Thrust end / coast start')
-
-    ax.legend(loc='upper right')
-    plt.savefig('basilisk_lowthrust_orbit.png', dpi=300)
-    plt.show()
+    # Plotting
+    if show_plots:
+        thrust_end_idx = max(0, len(t_hist) - coast_steps)
+        fig, ax = plt.subplots(figsize=(10,10))
+        ax.set_aspect('equal')
+        ax.axis('off')
+        ax.add_patch(Circle((0,0), R_E, fc='C0', ec='none'))
+        ax.annotate("Earth", xy=(0,0), ha='center', va='center', color='white')
+        theta = np.linspace(0, 2*np.pi, 400)
+        ax.plot(r_GEO*np.cos(theta), r_GEO*np.sin(theta), '--', lw=1.5, label='GEO radius')
+        if len(r_hist) > 0:
+            ax.plot(r_hist[:thrust_end_idx,0], r_hist[:thrust_end_idx,1], lw=1, label='Thrust phase')
+            ax.plot(r_hist[thrust_end_idx:,0], r_hist[thrust_end_idx:,1], lw=1, label='Coast phase')
+            ax.scatter(r_hist[0,0], r_hist[0,1], color='g', label='Start')
+            ax.scatter(r_hist[thrust_end_idx,0], r_hist[thrust_end_idx,1], color='k', label='Thrust end / coast start')
+        ax.legend(loc='upper right')
+        plt.savefig('basilisk_lowthrust_rk4.png', dpi=300)
+        plt.show()
 
     return {
         'r_hist': r_hist,
@@ -391,9 +378,8 @@ def run_basilisk_lowthrust():
         'apogee_m': r_apo,
         'ecc': ecc,
         'r_avg': r_avg,
-        'rel_err_percent': rel_err_percent
+        'rel_err_percent': rel_err_pct
     }
 
-
 if __name__ == "__main__":
-    results = run_basilisk_lowthrust()
+    results = run_basilisk_rk4(show_plots=True)
