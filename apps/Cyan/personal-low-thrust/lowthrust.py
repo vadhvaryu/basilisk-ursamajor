@@ -6,6 +6,12 @@ Nonimpulsive low-thrust LEO -> GEO transfer:
 - Model coast for 2 weeks and analyze stability of orbit.
 """
 
+import sys
+import os
+
+# Add root of repo to Python path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
@@ -189,7 +195,7 @@ def run_basilisk_rk4(show_plots=True):
     t_hist = []
 
     # Local shadow state for read/write when needed
-    # (rely on Basilisk to update these, reading from scObject whenever possible)
+    # (we will rely on Basilisk to update these, reading from scObject whenever possible)
     thrusting = True
     thrust_end_time = None
     t_sim = 0.0
@@ -198,6 +204,7 @@ def run_basilisk_rk4(show_plots=True):
 
     # ---- MAIN LOOP: step by dt, command thrust, read back states from Basilisk ----
     while step < max_steps:
+
         # Read latest state from scObject if available
         try:
             scState = scObject.scStateOutMsg.read()
@@ -217,9 +224,8 @@ def run_basilisk_rk4(show_plots=True):
                 v_N = np.array(scObject.hub.v_CN_NInit)
                 mass = scObject.hub.mHub
 
-        # compute semi-major axis 
+        # compute semi-major axis and check for cutoff: stop when radius reaches GEO
         r_mag = np.linalg.norm(r_N)
-        # check for cutoff: stop when radius reaches GEO
         if thrusting and r_mag >= r_GEO:
             thrusting = False
             thrust_end_time = t_sim
@@ -235,7 +241,7 @@ def run_basilisk_rk4(show_plots=True):
                 except Exception:
                     pass
             print(f"Thrust cutoff: radius reached GEO at t = {t_sim:.1f} s ({t_sim/86400.0:.4f} days)")
-            # don't break yet — we now enter coast and run for coast_duration (2 weeks)
+            # don't break yet — we'll now enter coast and run for coast_duration
 
         # If still thrusting, compute inertial thrust direction (along +v to push spacecraft forward)
         if thrusting:
@@ -260,7 +266,7 @@ def run_basilisk_rk4(show_plots=True):
                 except Exception:
                     pass
         else:
-            # ensure thruster is off
+            # ensure thruster off
             try:
                 payload = messaging.DoubleVecPayload()
                 payload.vec = [0.0]
@@ -272,7 +278,7 @@ def run_basilisk_rk4(show_plots=True):
                 except Exception:
                     pass
 
-        # Advance the simulation one step (use built-in RK4 integrator inside Basilisk)
+        # Advance the simulation one step (RK4 integrator inside Basilisk will be used)
         # Use SingleStep loop for fine control (many Basilisk examples use ExecuteSimulation for long runs)
         try:
             scSim.SingleStep()
@@ -299,7 +305,7 @@ def run_basilisk_rk4(show_plots=True):
                 v_N = np.array(trans.v_BN_N)
                 mass = scObject.hub.mHub
             except Exception:
-                # if read fails, continue with previous values (unlikely in working Basilisk setup)
+                # if read fails, continue with previous values (unlikely in a working Basilisk setup)
                 pass
 
         # log
