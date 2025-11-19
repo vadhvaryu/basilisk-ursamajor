@@ -156,4 +156,21 @@ def run_basilisk(show_plots=True):
     t_hist = np.array(t_hist)
 
     # Simple summary
-    r_last = np.linalg.norm(r_hist
+    r_last = np.linalg.norm(r_hist[-int(coast_duration/dt):], axis=1)
+    print(f"Final mass: {m_hist[-1]:.2f} kg")
+    print(f"Min/Max radius during coast: {r_last.min()/1e3:.1f}/{r_last.max()/1e3:.1f} km")
+
+    # Plot
+    if show_plots:
+        fig, ax = plt.subplots(figsize=(8,8))
+        ax.set_aspect('equal')
+        ax.add_patch(Circle((0,0), R_E, fc='C0'))
+        theta = np.linspace(0, 2*np.pi, 400)
+        ax.plot(r_GEO*np.cos(theta), r_GEO*np.sin(theta), '--', lw=1.5)
+        ax.plot(r_hist[:,0], r_hist[:,1], lw=1)
+        plt.show()
+
+    return r_hist, v_hist, t_hist, m_hist
+
+if __name__ == "__main__":
+    run_basilisk()
