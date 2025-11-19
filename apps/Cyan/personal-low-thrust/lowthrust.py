@@ -142,12 +142,12 @@ def run_lowthrust_basilisk():
     )
     print(summary_text)
 
-    # --- Plotting ---
+    # --- Graphing Trajectory ---
     fig, ax = plt.subplots(figsize=(12,12))
     ax.set_aspect('equal')
     ax.axis('off')
 
-    # Earth
+    # Earth (as circle)
     from matplotlib.patches import Circle
     ax.add_patch(Circle((0,0), R_E, fc='C0', ec='none'))
     ax.annotate("Earth", xy=(0,0), ha='center', va='center', color='white')
