@@ -3,6 +3,8 @@ Scenario: Nonimpulsive low-thrust LEO -> GEO transfer using Basilisk 2.8.19
 - Single thruster firing opposite to velocity direction (forward thrust)
 - Stop thrust when reaching GEO radius
 - Coast for 2 weeks to verify orbit stability
+
+I think this calc wrong (still editing), for now please checkout newlowthrust.py
 """
 
 import sys
