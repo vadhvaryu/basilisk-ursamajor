@@ -14,6 +14,12 @@ repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 if repo_root not in sys.path:
     sys.path.append(repo_root)
 print("Added repo root to Python path:", repo_root)
+
+# append path to basilisk folder
+basilisk_path = os.path.join(repo_root, "basilisk", "Basilisk")
+if basilisk_path not in sys.path:
+    sys.path.append(basilisk_path)
+print("Added Basilisk to Python path:", basilisk_path)
 #--------------
 
 
