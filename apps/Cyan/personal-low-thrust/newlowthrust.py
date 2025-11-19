@@ -55,7 +55,7 @@ def run(show_plots=True):
     m_0 = 1000.0  # kg, initial spacecraft mass
     
     # Propulsion system parameters
-    T_max = 1.0  # N, maximum thrust
+    T_max = 50.0  # N, maximum thrust
     I_sp = 10000.0  # s, specific impulse
     g_0 = 9.80665  # m/s^2, standard gravity
     
