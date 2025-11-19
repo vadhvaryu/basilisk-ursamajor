@@ -5,12 +5,15 @@ Nonimpulsive low-thrust LEO -> GEO transfer:
 - Stop thrust when reach GEO radius.
 - Model coast for 2 weeks and analyze stability of orbit.
 """
-
+#-------------
 import sys
 import os
 
 # Add root of repo to Python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+sys.path.append(repo_root)
+#--------------
+
 
 import numpy as np
 import matplotlib.pyplot as plt
