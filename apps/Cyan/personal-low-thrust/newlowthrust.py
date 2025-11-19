@@ -6,6 +6,8 @@ Simulates continuous tangential thrust from LEO (500 km) to GEO (35,000 km)
 followed by a 2-week coast phase to verify orbit stability.
 
 All units in SI: meters, m/s, kg, seconds, Newtons
+
+Note: runs but calcs incorrect
 """
 
 import os
