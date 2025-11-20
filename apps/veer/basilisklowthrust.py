@@ -49,7 +49,7 @@ def run(show_plots=True):
     r_final = a_final + R_E  # km
     
     # Spacecraft parameters
-    m_0 = 1000.0  # kg, initial mass
+    m_0 = 5000.0  # kg, initial mass
     
     # Engine parameters (matching reference)
     T = 1.0 / 1000.0  # kN (1 N converted to kN)
@@ -131,8 +131,9 @@ def run(show_plots=True):
     # --- THRUST PHASE ---
     print("\nStarting Thrust Phase...")
     
-    current_time = 0
-    max_time = macros.day2nano(200.0)  # 200 days max
+    # Define safe time limit (stay well below overflow at ~104 days)
+    SAFE_TIME_LIMIT = macros.day2nano(90.0)  # 90 days per segment
+    max_simulation_time = macros.day2nano(500.0)  # 500 days total max
     update_interval = macros.sec2nano(10.0)  # Update thrust every 10 seconds
     
     thrust_phase_complete = False
@@ -145,72 +146,137 @@ def run(show_plots=True):
     thrust_times = []
     thrust_masses = []
     
-    while current_time < max_time and not thrust_phase_complete:
-        # Execute simulation step
-        scSim.ConfigureStopTime(current_time + update_interval)
-        scSim.ExecuteSimulation()
-        
-        # Get current state (in meters and m/s)
-        r_BN_N = scObject.dynManager.getStateObject("hubPosition").getState()
-        v_BN_N = scObject.dynManager.getStateObject("hubVelocity").getState()
-        current_mass = scObject.hub.mHub
-        
-        # Convert to km and km/s for calculations
-        r_vec = np.array([r_BN_N[0][0], r_BN_N[1][0], r_BN_N[2][0]]) / 1000.0
-        v_vec = np.array([v_BN_N[0][0], v_BN_N[1][0], v_BN_N[2][0]]) / 1000.0
-        
-        r_mag = np.linalg.norm(r_vec)
-        v_mag = np.linalg.norm(v_vec)
-        
-        # Store trajectory data
-        thrust_positions.append(r_vec.copy())
-        thrust_velocities.append(v_vec.copy())
-        thrust_times.append(current_time * macros.NANO2SEC)
-        thrust_masses.append(current_mass)
-        
-        # Check for orbit crossing (Y coordinate sign change)
-        current_y = r_vec[1]
-        if last_y < 0 and current_y >= 0 and current_time > 0:
-            orbit_count += 1
-        last_y = current_y
-        
-        # Check if reached destination
-        if r_mag >= r_final:
-            thrust_phase_complete = True
-            print(f"\nThrust Phase Complete!")
-            print(f"Reached target radius at: {current_time * macros.NANO2SEC / 86400.0:.4f} days")
-            break
-        
-        # Calculate tangential thrust force (in velocity direction)
-        if v_mag > 0:
-            # Thrust direction is velocity direction (tangential)
-            thrust_dir = v_vec / v_mag
-            # Thrust magnitude in Newtons
-            thrust_force_kN = T * thrust_dir  # kN
-            # Convert to Newtons for Basilisk
-            thrust_force_N = thrust_force_kN * 1000.0  # N
-            
-            # Apply thrust in inertial frame
-            extFTObject.extForce_N = [
-                [thrust_force_N[0]],
-                [thrust_force_N[1]],
-                [thrust_force_N[2]]
-            ]
-        else:
-            extFTObject.extForce_N = [[0.0], [0.0], [0.0]]
-        
-        # Update mass (fuel consumption): dm/dt = -T / (I_sp * g_0)
-        dt = update_interval * macros.NANO2SEC  # seconds
-        dm = -T / (I_sp * g_0) * dt  # kg (T in kN, result in kg)
-        scObject.hub.mHub = max(10.0, current_mass + dm)  # Minimum 10 kg
-        
-        current_time += update_interval
+    # Track total elapsed time across all segments
+    total_elapsed_time = 0.0  # in seconds
+    segment_count = 0
     
-    thrust_end_time = current_time
-    final_thrust_mass = scObject.hub.mHub
+    # Initial state
+    current_scObject = scObject
+    current_scSim = scSim
+    current_extFTObject = extFTObject
+    
+    while total_elapsed_time < (max_simulation_time * macros.NANO2SEC) and not thrust_phase_complete:
+        segment_count += 1
+        print(f"\n--- Thrust Segment {segment_count} ---")
+        
+        # Run this segment up to safe time limit
+        segment_start_time = 0
+        segment_max_time = SAFE_TIME_LIMIT
+        current_time = 0
+        
+        while current_time < segment_max_time and not thrust_phase_complete:
+            # Execute simulation step
+            current_scSim.ConfigureStopTime(current_time + update_interval)
+            current_scSim.ExecuteSimulation()
+            
+            # Get current state (in meters and m/s)
+            r_BN_N = current_scObject.dynManager.getStateObject("hubPosition").getState()
+            v_BN_N = current_scObject.dynManager.getStateObject("hubVelocity").getState()
+            current_mass = current_scObject.hub.mHub
+            
+            # Convert to km and km/s for calculations
+            r_vec = np.array([r_BN_N[0][0], r_BN_N[1][0], r_BN_N[2][0]]) / 1000.0
+            v_vec = np.array([v_BN_N[0][0], v_BN_N[1][0], v_BN_N[2][0]]) / 1000.0
+            
+            r_mag = np.linalg.norm(r_vec)
+            v_mag = np.linalg.norm(v_vec)
+            
+            # Store trajectory data (with absolute time)
+            thrust_positions.append(r_vec.copy())
+            thrust_velocities.append(v_vec.copy())
+            thrust_times.append(total_elapsed_time + current_time * macros.NANO2SEC)
+            thrust_masses.append(current_mass)
+            
+            # Check for orbit crossing (Y coordinate sign change)
+            current_y = r_vec[1]
+            if last_y < 0 and current_y >= 0 and len(thrust_times) > 1:
+                orbit_count += 1
+            last_y = current_y
+            
+            # Check if reached destination
+            if r_mag >= r_final:
+                thrust_phase_complete = True
+                print(f"Thrust Phase Complete!")
+                print(f"Reached target radius at: {(total_elapsed_time + current_time * macros.NANO2SEC) / 86400.0:.4f} days")
+                break
+            
+            # Calculate tangential thrust force (in velocity direction)
+            if v_mag > 0:
+                # Thrust direction is velocity direction (tangential)
+                thrust_dir = v_vec / v_mag
+                # Thrust magnitude in Newtons
+                thrust_force_kN = T * thrust_dir  # kN
+                # Convert to Newtons for Basilisk
+                thrust_force_N = thrust_force_kN * 1000.0  # N
+                
+                # Apply thrust in inertial frame
+                current_extFTObject.extForce_N = [
+                    [thrust_force_N[0]],
+                    [thrust_force_N[1]],
+                    [thrust_force_N[2]]
+                ]
+            else:
+                current_extFTObject.extForce_N = [[0.0], [0.0], [0.0]]
+            
+            # Update mass (fuel consumption): dm/dt = -T / (I_sp * g_0)
+            dt = update_interval * macros.NANO2SEC  # seconds
+            dm = -T / (I_sp * g_0) * dt  # kg (T in kN, result in kg)
+            current_scObject.hub.mHub = max(10.0, current_mass + dm)  # Minimum 10 kg
+            
+            current_time += update_interval
+        
+        # Update total elapsed time
+        total_elapsed_time += current_time * macros.NANO2SEC
+        
+        # If not complete, create new simulation for next segment
+        if not thrust_phase_complete and total_elapsed_time < (max_simulation_time * macros.NANO2SEC):
+            print(f"Segment time limit reached. Creating new simulation segment...")
+            print(f"Progress: {(r_mag - r_init) / (r_final - r_init) * 100:.1f}% to target")
+            
+            # Save current state
+            r_BN_N_seg = current_scObject.dynManager.getStateObject("hubPosition").getState()
+            v_BN_N_seg = current_scObject.dynManager.getStateObject("hubVelocity").getState()
+            current_mass_seg = current_scObject.hub.mHub
+            
+            # Create new simulation
+            current_scSim = SimulationBaseClass.SimBaseClass()
+            dynProcess_new = current_scSim.CreateNewProcess(dynProcessName + f"_{segment_count}")
+            dynProcess_new.addTask(current_scSim.CreateNewTask(dynTaskName + f"_{segment_count}", simTimeStep))
+            
+            # Create new spacecraft
+            current_scObject = spacecraft.Spacecraft()
+            current_scObject.ModelTag = f"LEO-GEO-Spacecraft-Seg{segment_count}"
+            current_scObject.hub.mHub = current_mass_seg
+            current_scObject.hub.r_BcB_B = [[0.0], [0.0], [0.0]]
+            current_scObject.hub.IHubPntBc_B = unitTestSupport.np2EigenMatrix3d(I)
+            current_scObject.hub.r_CN_NInit = r_BN_N_seg
+            current_scObject.hub.v_CN_NInit = v_BN_N_seg
+            current_scObject.hub.sigma_BNInit = [[0.0], [0.0], [0.0]]
+            current_scObject.hub.omega_BN_BInit = [[0.0], [0.0], [0.0]]
+            
+            current_scSim.AddModelToTask(dynTaskName + f"_{segment_count}", current_scObject)
+            
+            # Add gravity
+            gravFactory_new = simIncludeGravBody.gravBodyFactory()
+            earth_new = gravFactory_new.createEarth()
+            earth_new.isCentralBody = True
+            earth_new.mu = mu * 1e9
+            gravFactory_new.addBodiesTo(current_scObject)
+            
+            # Add external force
+            current_extFTObject = extForceTorque.ExtForceTorque()
+            current_extFTObject.ModelTag = f"tangentialThrust_{segment_count}"
+            current_scObject.addDynamicEffector(current_extFTObject)
+            current_scSim.AddModelToTask(dynTaskName + f"_{segment_count}", current_extFTObject)
+            
+            # Initialize new simulation
+            current_scSim.InitializeSimulation()
+    
+    thrust_end_time_sec = total_elapsed_time
+    final_thrust_mass = current_scObject.hub.mHub
     propellant_used = m_0 - final_thrust_mass
     
-    print(f"Time of flight: {thrust_end_time * macros.NANO2SEC / 86400.0:.4f} days")
+    print(f"\nTime of flight: {thrust_end_time_sec / 86400.0:.4f} days")
     print(f"Number of orbits: {orbit_count}")
     print(f"Propellant used: {propellant_used:.4f} kg")
     print(f"Final speed (thrust cutoff): {v_mag:.3f} km/s")
@@ -218,37 +284,73 @@ def run(show_plots=True):
     # --- COAST PHASE ---
     print("\nStarting Coast Phase...")
     
-    # Turn off thrust
-    extFTObject.extForce_N = [[0.0], [0.0], [0.0]]
+    # Get final state from thrust phase
+    r_BN_N_final = current_scObject.dynManager.getStateObject("hubPosition").getState()
+    v_BN_N_final = current_scObject.dynManager.getStateObject("hubVelocity").getState()
+    
+    # Create a NEW simulation for coast phase
+    scSim2 = SimulationBaseClass.SimBaseClass()
+    dynProcess2 = scSim2.CreateNewProcess(dynProcessName + "_coast")
+    dynProcess2.addTask(scSim2.CreateNewTask(dynTaskName + "_coast", simTimeStep))
+    
+    # Create new spacecraft with final state from thrust phase
+    scObject2 = spacecraft.Spacecraft()
+    scObject2.ModelTag = "LEO-GEO-Spacecraft-Coast"
+    scObject2.hub.mHub = final_thrust_mass
+    scObject2.hub.r_BcB_B = [[0.0], [0.0], [0.0]]
+    scObject2.hub.IHubPntBc_B = unitTestSupport.np2EigenMatrix3d(I)
+    
+    # Set initial conditions from end of thrust phase
+    scObject2.hub.r_CN_NInit = r_BN_N_final
+    scObject2.hub.v_CN_NInit = v_BN_N_final
+    scObject2.hub.sigma_BNInit = [[0.0], [0.0], [0.0]]
+    scObject2.hub.omega_BN_BInit = [[0.0], [0.0], [0.0]]
+    
+    scSim2.AddModelToTask(dynTaskName + "_coast", scObject2)
+    
+    # Add gravity to new spacecraft
+    gravFactory2 = simIncludeGravBody.gravBodyFactory()
+    earth2 = gravFactory2.createEarth()
+    earth2.isCentralBody = True
+    earth2.mu = mu * 1e9
+    gravFactory2.addBodiesTo(scObject2)
+    
+    # Add navigation
+    sNavObject2 = simpleNav.SimpleNav()
+    sNavObject2.ModelTag = "SimpleNavigation2"
+    scSim2.AddModelToTask(dynTaskName + "_coast", sNavObject2)
+    sNavObject2.scStateInMsg.subscribeTo(scObject2.scStateOutMsg)
+    
+    # Data logging for coast phase
+    coast_sample_interval = macros.sec2nano(600.0)  # Sample every 10 minutes
+    scStateLog2 = scObject2.scStateOutMsg.recorder(coast_sample_interval)
+    scSim2.AddModelToTask(dynTaskName + "_coast", scStateLog2)
+    
+    # Initialize coast simulation
+    scSim2.InitializeSimulation()
     
     # Coast for 14 days
     t_coast = macros.day2nano(14.0)
-    coast_end_time = thrust_end_time + t_coast
+    scSim2.ConfigureStopTime(t_coast)
+    scSim2.ExecuteSimulation()
+    
+    # Extract coast phase data
+    coast_times_nano = scStateLog2.times()
+    coast_r_BN_N = scStateLog2.r_BN_N / 1000.0  # Convert to km
+    coast_v_BN_N = scStateLog2.v_BN_N / 1000.0  # Convert to km/s
     
     coast_positions = []
     coast_velocities = []
     coast_times = []
     
-    # Run coast phase with frequent sampling
-    coast_sample_interval = macros.sec2nano(600.0)  # Sample every 10 minutes
+    for i in range(len(coast_times_nano)):
+        coast_positions.append(coast_r_BN_N[i])
+        coast_velocities.append(coast_v_BN_N[i])
+        # Add thrust end time to get absolute time
+        coast_times.append(thrust_end_time_sec + coast_times_nano[i] * macros.NANO2SEC)
     
-    while current_time < coast_end_time:
-        sample_time = min(current_time + coast_sample_interval, coast_end_time)
-        scSim.ConfigureStopTime(sample_time)
-        scSim.ExecuteSimulation()
-        
-        # Get state
-        r_BN_N = scObject.dynManager.getStateObject("hubPosition").getState()
-        v_BN_N = scObject.dynManager.getStateObject("hubVelocity").getState()
-        
-        r_vec = np.array([r_BN_N[0][0], r_BN_N[1][0], r_BN_N[2][0]]) / 1000.0
-        v_vec = np.array([v_BN_N[0][0], v_BN_N[1][0], v_BN_N[2][0]]) / 1000.0
-        
-        coast_positions.append(r_vec.copy())
-        coast_velocities.append(v_vec.copy())
-        coast_times.append(current_time * macros.NANO2SEC)
-        
-        current_time = sample_time
+    coast_positions = np.array(coast_positions)
+    coast_velocities = np.array(coast_velocities)
     
     # Analyze coast phase orbit
     coast_radii = [np.linalg.norm(r) for r in coast_positions]
@@ -261,22 +363,17 @@ def run(show_plots=True):
     final_v_vec = coast_velocities[-1]
     v_final_coast = np.linalg.norm(final_v_vec)
     
-    print(f"Coast Phase Complete!")
-    print(f"Coast Radius Percent Error: {r_coast_error:.3f} %")
-    print(f"Coast eccentricity: {e_coast:.5f}")
-    print(f"Speed after coast: {v_final_coast:.3f} km/s")
-    
-    # --- Final Summary ---
+    # --- Final Summary (single consolidated output) ---
     print("\n" + "=" * 60)
-    print("FINAL RESULTS")
+    print("SIMULATION COMPLETE - FINAL RESULTS")
     print("=" * 60)
     print(f"Initial Altitude: {a_init} km")
     print(f"Final Target Altitude: {a_final} km")
     print(f"Max Thrust: {T*1000} N")
     print(f"Initial speed: {v_init:.3f} km/s")
     print(f"Final (thrust cutoff) speed: {v_mag:.3f} km/s")
-    print(f"{propellant_used:.4f} kg of propellant used")
-    print(f"Time of flight: {thrust_end_time * macros.NANO2SEC / 86400.0:.4f} days")
+    print(f"Propellant used: {propellant_used:.4f} kg")
+    print(f"Time of flight: {thrust_end_time_sec / 86400.0:.4f} days")
     print(f"Number of orbits: {orbit_count}")
     print(f"Coast Radius Percent Error: {r_coast_error:.3f} %")
     print(f"Coast eccentricity: {e_coast:.5f}")
@@ -299,7 +396,7 @@ def run(show_plots=True):
             f"Initial speed: {v_init:.3f} km/s\n"
             f"Final (thrust cutoff) speed: {v_mag:.3f} km/s\n"
             f"Propellant used: {propellant_used:.4f} kg\n"
-            f"Time of flight: {thrust_end_time * macros.NANO2SEC / 86400.0:.4f} days\n"
+            f"Time of flight: {thrust_end_time_sec / 86400.0:.4f} days\n"
             f"Number of orbits: {orbit_count}\n"
             f"Coast Radius Error: {r_coast_error:.3f} %\n"
             f"Coast eccentricity: {e_coast:.5f}\n"
