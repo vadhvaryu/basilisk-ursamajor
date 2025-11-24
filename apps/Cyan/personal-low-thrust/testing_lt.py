@@ -32,7 +32,7 @@ def run(show_plots=True):
     mu = 3.986e5  # km^3/s^2, Earth gravitational parameter
     
     # Initial orbit parameters
-    a_init = 622.0  # km, altitude
+    a_init = 278.0  # km, altitude
     r_init = a_init + R_E  # km, orbital radius
     v_init = np.sqrt(mu / r_init)  # km/s, circular orbit velocity
     
@@ -41,11 +41,11 @@ def run(show_plots=True):
     r_final = a_final + R_E  # km
     
     # Spacecraft parameters
-    m_0 = 10000.0  # kg, initial mass
+    m_0 = 1000.0  # kg, initial mass
     
     # Engine parameters (matching reference)
-    T = 1.43 / 1000.0  # kN (1 N converted to kN)
-    I_sp = 1800.0  # s, specific impulse
+    T = 10 / 1000.0  # kN (1 N converted to kN)
+    I_sp = 5000.0  # s, specific impulse
     g_0 = 9.807e-3  # km/s^2, standard gravity
     
     print("=" * 60)
