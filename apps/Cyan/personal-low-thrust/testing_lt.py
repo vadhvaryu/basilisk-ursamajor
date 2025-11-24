@@ -44,7 +44,7 @@ def run(show_plots=True):
     m_0 = 1000.0  # kg, initial mass
     
     # Engine parameters (matching reference)
-    T = 1.0 / 1000.0  # kN (1 N converted to kN)
+    T = 100.0 / 1000.0  # kN (1 N converted to kN)
     I_sp = 1000.0  # s, specific impulse
     g_0 = 9.807e-3  # km/s^2, standard gravity
     
