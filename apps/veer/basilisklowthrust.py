@@ -49,10 +49,10 @@ def run(show_plots=True):
     r_final = a_final + R_E  # km
     
     # Spacecraft parameters
-    m_0 = 5000.0  # kg, initial mass
+    m_0 = 1000.0  # kg, initial mass
     
     # Engine parameters (matching reference)
-    T = 1.0 / 1000.0  # kN (1 N converted to kN)
+    T = 2.5 / 1000.0  # kN (1 N converted to kN)
     I_sp = 10000.0  # s, specific impulse
     g_0 = 9.807e-3  # km/s^2, standard gravity
     
