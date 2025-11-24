@@ -1,13 +1,5 @@
 """
-LEO to GEO Low Thrust Orbit Transfer using Basilisk
-
-This script simulates a spacecraft performing a low-thrust spiral transfer
-from Low Earth Orbit (LEO) to Geostationary Earth Orbit (GEO) using continuous
-tangential thrust with Basilisk's astrodynamics framework.
-
-Matches the dynamics of the reference scipy implementation.
-
-Author: Based on Basilisk examples
+copied veer's basilisklowthrust.py for testing for validation
 """
 
 import os
@@ -134,7 +126,7 @@ def run(show_plots=True):
     # Define safe time limit (stay well below overflow at ~104 days)
     SAFE_TIME_LIMIT = macros.day2nano(90.0)  # 90 days per segment
     max_simulation_time = macros.day2nano(500.0)  # 500 days total max
-    update_interval = macros.sec2nano(10.0)  # Update thrust every 10 seconds
+    update_interval = macros.sec2nano(5.0)  # Update thrust every 10 seconds
     
     thrust_phase_complete = False
     orbit_count = 0
