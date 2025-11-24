@@ -40,12 +40,12 @@ def run(show_plots=True):
     mu = 3.986e5  # km^3/s^2, Earth gravitational parameter
     
     # Initial orbit parameters
-    a_init = 500.0  # km, altitude
+    a_init = 300.0  # km, altitude
     r_init = a_init + R_E  # km, orbital radius
     v_init = np.sqrt(mu / r_init)  # km/s, circular orbit velocity
     
     # Final orbit parameters
-    a_final = 35000.0  # km, altitude (matching reference)
+    a_final = 35786.0  # km, altitude (matching reference)
     r_final = a_final + R_E  # km
     
     # Spacecraft parameters
