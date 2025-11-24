@@ -32,20 +32,20 @@ def run(show_plots=True):
     mu = 3.986e5  # km^3/s^2, Earth gravitational parameter
     
     # Initial orbit parameters
-    a_init = 622.0  # km, altitude
+    a_init = 625.0  # km, altitude
     r_init = a_init + R_E  # km, orbital radius
     v_init = np.sqrt(mu / r_init)  # km/s, circular orbit velocity
     
     # Final orbit parameters
-    a_final = 35622.0  # km, altitude (matching reference)
+    a_final = 35909.0  # km, altitude (matching reference)
     r_final = a_final + R_E  # km
     
     # Spacecraft parameters
-    m_0 = 300.0  # kg, initial mass
+    m_0 = 1000.0  # kg, initial mass
     
     # Engine parameters (matching reference)
     T = 1.0 / 1000.0  # kN (1 N converted to kN)
-    I_sp = 3100.0  # s, specific impulse
+    I_sp = 1000.0  # s, specific impulse
     g_0 = 9.807e-3  # km/s^2, standard gravity
     
     print("=" * 60)
@@ -126,7 +126,7 @@ def run(show_plots=True):
     # Define safe time limit (stay well below overflow at ~104 days)
     SAFE_TIME_LIMIT = macros.day2nano(90.0)  # 90 days per segment
     max_simulation_time = macros.day2nano(500.0)  # 500 days total max
-    update_interval = macros.sec2nano(5.0)  # Update thrust every 10 seconds
+    update_interval = macros.sec2nano(10.0)  # Update thrust every 10 seconds
     
     thrust_phase_complete = False
     orbit_count = 0
