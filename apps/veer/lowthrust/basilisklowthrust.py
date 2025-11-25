@@ -11,12 +11,8 @@ Author: Based on Basilisk examples
 """
 
 import os
-import sys
-import csv
-from datetime import datetime
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 from matplotlib.patches import Circle
 
 from Basilisk import __path__
@@ -31,17 +27,13 @@ from Basilisk.utilities import simIncludeGravBody
 
 bskPath = __path__[0]
 
-def run(show_plots=False, save_csv=True):
+def run(show_plots=True):
     """
     Main simulation function for LEO to GEO low thrust transfer
     
     Args:
         show_plots (bool): Whether to display plots at the end
-        save_csv (bool): Whether to save results to CSV file
     """
-    
-    # Suppress duplicate print output by flushing immediately
-    sys.stdout.reconfigure(line_buffering=True)
     
     # --- Constants (matching reference simulation) ---
     R_E = 6378.0  # km, Earth radius
@@ -57,25 +49,23 @@ def run(show_plots=False, save_csv=True):
     r_final = a_final + R_E  # km
     
     # Spacecraft parameters
-    m_0 = 500.0  # kg, initial mass
+    m_0 = 1000.0  # kg, initial mass
     
     # Engine parameters (matching reference)
-    T = 0.017 / 1000.0  # kN (1 N converted to kN)
-    I_sp = 1150.0  # s, specific impulse
+    T = 1.0 / 1000.0  # kN (1 N converted to kN)
+    I_sp = 10000.0  # s, specific impulse
     g_0 = 9.807e-3  # km/s^2, standard gravity
     
-    # Print initial parameters ONCE
-    print("=" * 60, flush=True)
-    print("LEO to GEO Low Thrust Transfer - Basilisk Implementation", flush=True)
-    print("=" * 60, flush=True)
-    print(f"Initial Altitude: {a_init} km", flush=True)
-    print(f"Final Target Altitude: {a_final} km", flush=True)
-    print(f"Max Thrust: {T*1000} N", flush=True)
-    print(f"Specific Impulse: {I_sp} s", flush=True)
-    print(f"Initial Mass: {m_0} kg", flush=True)
-    print(f"Initial Speed: {v_init:.3f} km/s", flush=True)
-    print("=" * 60, flush=True)
-    print("Simulation running...", flush=True)
+    print("=" * 60)
+    print("LEO to GEO Low Thrust Transfer - Basilisk Implementation")
+    print("=" * 60)
+    print(f"Initial Altitude: {a_init} km")
+    print(f"Final Target Altitude: {a_final} km")
+    print(f"Max Thrust: {T*1000} N")
+    print(f"Specific Impulse: {I_sp} s")
+    print(f"Initial Mass: {m_0} kg")
+    print(f"Initial Speed: {v_init:.3f} km/s")
+    print("=" * 60)
     
     # --- Simulation Parameters ---
     dynTaskName = "dynTask"
@@ -111,6 +101,7 @@ def run(show_plots=False, save_csv=True):
     scSim.AddModelToTask(dynTaskName, scObject)
     
     # --- Gravity Setup ---
+    # Use gravity factory to set up Earth gravity with exact mu
     gravFactory = simIncludeGravBody.gravBodyFactory()
     earth = gravFactory.createEarth()
     earth.isCentralBody = True
@@ -138,6 +129,8 @@ def run(show_plots=False, save_csv=True):
     scSim.InitializeSimulation()
     
     # --- THRUST PHASE ---
+    print("\nStarting Thrust Phase...")
+    
     # Define safe time limit (stay well below overflow at ~104 days)
     SAFE_TIME_LIMIT = macros.day2nano(90.0)  # 90 days per segment
     max_simulation_time = macros.day2nano(500.0)  # 500 days total max
@@ -164,6 +157,7 @@ def run(show_plots=False, save_csv=True):
     
     while total_elapsed_time < (max_simulation_time * macros.NANO2SEC) and not thrust_phase_complete:
         segment_count += 1
+        print(f"\n--- Thrust Segment {segment_count} ---")
         
         # Run this segment up to safe time limit
         segment_start_time = 0
@@ -202,6 +196,8 @@ def run(show_plots=False, save_csv=True):
             # Check if reached destination
             if r_mag >= r_final:
                 thrust_phase_complete = True
+                print(f"Thrust Phase Complete!")
+                print(f"Reached target radius at: {(total_elapsed_time + current_time * macros.NANO2SEC) / 86400.0:.4f} days")
                 break
             
             # Calculate tangential thrust force (in velocity direction)
@@ -234,6 +230,9 @@ def run(show_plots=False, save_csv=True):
         
         # If not complete, create new simulation for next segment
         if not thrust_phase_complete and total_elapsed_time < (max_simulation_time * macros.NANO2SEC):
+            print(f"Segment time limit reached. Creating new simulation segment...")
+            print(f"Progress: {(r_mag - r_init) / (r_final - r_init) * 100:.1f}% to target")
+            
             # Save current state
             r_BN_N_seg = current_scObject.dynManager.getStateObject("hubPosition").getState()
             v_BN_N_seg = current_scObject.dynManager.getStateObject("hubVelocity").getState()
@@ -277,7 +276,14 @@ def run(show_plots=False, save_csv=True):
     final_thrust_mass = current_scObject.hub.mHub
     propellant_used = m_0 - final_thrust_mass
     
+    print(f"\nTime of flight: {thrust_end_time_sec / 86400.0:.4f} days")
+    print(f"Number of orbits: {orbit_count}")
+    print(f"Propellant used: {propellant_used:.4f} kg")
+    print(f"Final speed (thrust cutoff): {v_mag:.3f} km/s")
+    
     # --- COAST PHASE ---
+    print("\nStarting Coast Phase...")
+    
     # Get final state from thrust phase
     r_BN_N_final = current_scObject.dynManager.getStateObject("hubPosition").getState()
     v_BN_N_final = current_scObject.dynManager.getStateObject("hubVelocity").getState()
@@ -357,62 +363,22 @@ def run(show_plots=False, save_csv=True):
     final_v_vec = coast_velocities[-1]
     v_final_coast = np.linalg.norm(final_v_vec)
     
-    # --- Print Final Summary ONCE ---
-    print("\n" + "=" * 60, flush=True)
-    print("SIMULATION COMPLETE - FINAL RESULTS", flush=True)
-    print("=" * 60, flush=True)
-    print(f"Initial Altitude: {a_init} km", flush=True)
-    print(f"Final Target Altitude: {a_final} km", flush=True)
-    print(f"Max Thrust: {T*1000} N", flush=True)
-    print(f"Initial speed: {v_init:.3f} km/s", flush=True)
-    print(f"Final (thrust cutoff) speed: {v_mag:.3f} km/s", flush=True)
-    print(f"Propellant used: {propellant_used:.4f} kg", flush=True)
-    print(f"Time of flight: {thrust_end_time_sec / 86400.0:.4f} days", flush=True)
-    print(f"Number of orbits: {orbit_count}", flush=True)
-    print(f"Coast Radius Percent Error: {r_coast_error:.3f} %", flush=True)
-    print(f"Coast eccentricity: {e_coast:.5f}", flush=True)
-    print(f"Speed after coast: {v_final_coast:.3f} km/s", flush=True)
-    print("=" * 60, flush=True)
-    
-    # --- Save to CSV (metrics as columns, each run = one row) ---
-    if save_csv:
-        csv_filename = "leo_geo_transfer_results.csv"
-        run_label = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        # Create a dict: one row per run
-        row_data = {
-            'Run ID': run_label,
-            'Initial Altitude (km)': a_init,
-            'Target Altitude (km)': a_final,
-            'Initial Mass (kg)': m_0,
-            'Max Thrust (N)': T * 1000,
-            'Specific Impulse (s)': I_sp,
-            'Initial Speed (km/s)': v_init,
-            'Final Speed (Thrust Cutoff) (km/s)': v_mag,
-            'Final Mass (kg)': final_thrust_mass,
-            'Propellant Used (kg)': propellant_used,
-            'Time of Flight (days)': thrust_end_time_sec / 86400.0,
-            'Number of Orbits': orbit_count,
-            'Number of Segments': segment_count,
-            'Coast Apoapsis (km)': r_coast_apo,
-            'Coast Periapsis (km)': r_coast_per,
-            'Coast Radius Error (%)': r_coast_error,
-            'Coast Eccentricity': e_coast,
-            'Speed After Coast (km/s)': v_final_coast
-        }
-
-        # Convert row to DataFrame
-        row_df = pd.DataFrame([row_data])
-
-        # Append to CSV (create if missing)
-        if os.path.exists(csv_filename):
-            row_df.to_csv(csv_filename, mode='a', header=False, index=False)
-            print(f"\nAppended new row: {run_label}")
-        else:
-            row_df.to_csv(csv_filename, index=False)
-            print(f"\nCreated new CSV file: {csv_filename}")
-
-
+    # --- Final Summary (single consolidated output) ---
+    print("\n" + "=" * 60)
+    print("SIMULATION COMPLETE - FINAL RESULTS")
+    print("=" * 60)
+    print(f"Initial Altitude: {a_init} km")
+    print(f"Final Target Altitude: {a_final} km")
+    print(f"Max Thrust: {T*1000} N")
+    print(f"Initial speed: {v_init:.3f} km/s")
+    print(f"Final (thrust cutoff) speed: {v_mag:.3f} km/s")
+    print(f"Propellant used: {propellant_used:.4f} kg")
+    print(f"Time of flight: {thrust_end_time_sec / 86400.0:.4f} days")
+    print(f"Number of orbits: {orbit_count}")
+    print(f"Coast Radius Percent Error: {r_coast_error:.3f} %")
+    print(f"Coast eccentricity: {e_coast:.5f}")
+    print(f"Speed after coast: {v_final_coast:.3f} km/s")
+    print("=" * 60)
     
     # --- Plotting ---
     if show_plots:
@@ -499,12 +465,9 @@ def run(show_plots=False, save_csv=True):
         plt.tight_layout()
         
         plt.show()
-        
-        # Close plots to prevent memory issues
-        plt.close('all')
     
     return scSim
 
 
 if __name__ == "__main__":
-    run(show_plots=True, save_csv=False)
+    run(show_plots=True)
