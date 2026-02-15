@@ -653,7 +653,7 @@ def run(show_plots=True):
             break
         
         # Check if orbit is sufficiently circular BEFORE deciding to burn
-        # Stop when eccentricity is low enough - don't worry about exact altitude
+        # Stop when eccentricity is low enough (e < 0.01)
         fuel_remaining = current_mass - 10.0  # Keep 10 kg minimum
         
         # Orbit is circular if eccentricity is very low
