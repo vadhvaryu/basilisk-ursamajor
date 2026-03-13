@@ -26,8 +26,6 @@ def run(show_plots=True):
       Burn 2  – Apogee kick: circularises the transfer orbit at GEO altitude
       Verification coast – 14-day drift to confirm orbit stability
 
-    All burns are short (~minutes) impulsive manoeuvres modelled with
-    finite thrust so the Basilisk dynamics engine handles them naturally.
     """
 
     # ------------------------------------------------------------------ #
@@ -52,12 +50,9 @@ def run(show_plots=True):
     # ------------------------------------------------------------------ #
     # Chemical engine parameters
     # ------------------------------------------------------------------ #
-    T    = 890.0 / 1000.0  # kN  (2000 N bipropellant thruster — gives T/W~0.2 for 1000 kg,
-    #                    reducing finite-burn losses to ~1-2 min per burn.
-    #                    Representative of large GEO comsat apogee engines
-    #                    e.g. Aerojet R-40 class, Isp ~450 s bipropellant.)
-    I_sp = 303.0           # s   (typical bipropellant I_sp)
-    g_0  = 9.807e-3        # km/s² standard gravity
+    T    = 890.0 / 1000.0  # kN  
+    I_sp = 303.0           # s   
+    g_0  = 9.807e-3        # km/s²  gravity
 
     # ------------------------------------------------------------------ #
     # Hohmann transfer Δv budget (ideal impulsive, for reference only)
@@ -75,16 +70,6 @@ def run(show_plots=True):
 
     # ------------------------------------------------------------------ #
     # Finite-burn correction for Burn 1 (perigee kick)
-    # ------------------------------------------------------------------ #
-    # Because Burn 1 is finite (~15 min at 2000 N), the spacecraft rises
-    # significantly during the burn. Applying only dv1_ideal means the
-    # effective perigee is higher than LEO, causing the apogee to fall
-    # short of GEO by ~3000 km.
-    #
-    # Solution: numerically simulate the burn in a simple 2-body model
-    # (no Basilisk overhead) to find exactly what Δv_target produces
-    # apogee = r_final. We bisect on the Δv target until the simulated
-    # post-burn apogee matches r_final to within 1 km.
     # ------------------------------------------------------------------ #
 
     def simulate_burn_apogee(dv_target, r0, v0, m0, T_kN, Isp, g0, mu_val, dt=1.0):
@@ -105,7 +90,7 @@ def run(show_plots=True):
             dv_step = (T_kN / m) * dt       # km/s, uses current mass
             dv_acc += dv_step
 
-            # Clamp last step so we don't overshoot dv_target
+            # Clamp last step so don't overshoot dv_target
             if dv_acc > dv_target:
                 dt_actual = (dv_target - (dv_acc - dv_step)) / (T_kN / m)
             else:
