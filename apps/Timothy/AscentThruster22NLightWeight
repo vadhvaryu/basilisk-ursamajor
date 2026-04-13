@@ -1,0 +1,205 @@
+import os
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import numpy as np
+from matplotlib.patches import Circle
+
+from Basilisk import __path__
+from Basilisk.architecture import messaging
+from Basilisk.simulation import spacecraft
+from Basilisk.simulation import extForceTorque
+from Basilisk.simulation import simpleNav
+from Basilisk.utilities import SimulationBaseClass
+from Basilisk.utilities import macros
+from Basilisk.utilities import unitTestSupport
+from Basilisk.utilities import simIncludeGravBody
+
+bskPath = __path__[0]
+
+def run_spiral(show_plots=True):
+    # ------------------------------------------------------------------ #
+    # Constants & Targets
+    # ------------------------------------------------------------------ #
+    R_E  = 6378.0          # km  – Earth radius
+    mu   = 3.986e5         # km³/s² – Earth gravitational parameter
+
+    a_init  = 278.0        # km LEO altitude
+    r_init  = a_init + R_E
+    v_init  = np.sqrt(mu / r_init)
+
+    a_final = 35786.0      # km GEO altitude target
+    r_final = a_final + R_E
+    
+    # Spacecraft & ASCENT parameters
+    m_0  = 300.0           # kg initial wet mass (ESPA-class SmallSat)
+    T    = 22.0 / 1000.0   # kN (22N Benchmark Thruster)
+    I_sp = 266.0           # s (ASCENT Theoretical Isp)
+    g_0  = 9.807e-3        # km/s²
+
+    print("=" * 60)
+    print("LEO to GEO ASCENT Spiral Transfer (Transverse Steering)")
+    print("=" * 60)
+
+    # ------------------------------------------------------------------ #
+    # Basilisk Setup
+    # ------------------------------------------------------------------ #
+    simTimeStep    = macros.sec2nano(10.0)   
+    updateInterval = macros.sec2nano(10.0) 
+
+    scSim = SimulationBaseClass.SimBaseClass()
+    dynProc = scSim.CreateNewProcess("dynProcess")
+    dynProc.addTask(scSim.CreateNewTask("dynTask", simTimeStep))
+
+    scObj = spacecraft.Spacecraft()
+    scObj.ModelTag = "ASCENT_Spiral"
+    scObj.hub.mHub = m_0
+    
+    scObj.hub.r_CN_NInit = [[r_init * 1000.0], [0.0], [0.0]]   
+    scObj.hub.v_CN_NInit = [[0.0], [v_init * 1000.0], [0.0]]   
+    scSim.AddModelToTask("dynTask", scObj)
+
+    gF = simIncludeGravBody.gravBodyFactory()
+    earth = gF.createEarth()
+    earth.isCentralBody = True
+    earth.mu = mu * 1e9
+    gF.addBodiesTo(scObj)
+
+    extFT = extForceTorque.ExtForceTorque()
+    extFT.ModelTag = "ascent_thruster"
+    scObj.addDynamicEffector(extFT)
+    scSim.AddModelToTask("dynTask", extFT)
+
+    scSim.InitializeSimulation()
+
+    # ------------------------------------------------------------------ #
+    # Execution Loop
+    # ------------------------------------------------------------------ #
+    print("Beginning continuous transverse spiral burn...")
+    
+    times = []
+    altitudes = []
+    masses = []
+    positions = [] 
+    eccentricities = []
+    
+    current_time = 0
+    burn_complete = False
+    max_sim_time = macros.day2nano(15.0) 
+
+    while current_time < max_sim_time and not burn_complete:
+        scSim.ConfigureStopTime(current_time + updateInterval)
+        scSim.ExecuteSimulation()
+
+        r_BN = scObj.dynManager.getStateObject("hubPosition").getState()
+        v_BN = scObj.dynManager.getStateObject("hubVelocity").getState()
+        m_cur = scObj.hub.mHub
+
+        r_vec = np.array([r_BN[0][0], r_BN[1][0], r_BN[2][0]]) / 1000.0
+        v_vec = np.array([v_BN[0][0], v_BN[1][0], v_BN[2][0]]) / 1000.0
+        r_mag = np.linalg.norm(r_vec)
+        v_mag = np.linalg.norm(v_vec)
+
+        # Orbital Eccentricity Calculation
+        h_vec = np.cross(r_vec, v_vec)
+        e_vec = np.cross(v_vec, h_vec) / mu - (r_vec / r_mag)
+        ecc = np.linalg.norm(e_vec)
+
+        # Log data
+        times.append(current_time * macros.NANO2SEC)
+        altitudes.append(r_mag - R_E)
+        masses.append(m_cur)
+        positions.append(r_vec.copy()) 
+        eccentricities.append(ecc)
+
+        if r_mag >= r_final:
+            burn_complete = True
+            extFT.extForce_N = [[0.0], [0.0], [0.0]]
+            print(f"\nTarget Altitude Reached!")
+            break
+            
+        if m_cur <= 10.0:
+            burn_complete = True
+            extFT.extForce_N = [[0.0], [0.0], [0.0]]
+            print(f"\nFuel Depleted before reaching target.")
+            break
+
+        # --- THE FIX: Transverse Steering Law ---
+        # Instead of pointing along velocity, we point perpendicular to the radius vector
+        if np.linalg.norm(h_vec) > 0:
+            transverse_dir = np.cross(h_vec, r_vec)
+            transverse_dir = transverse_dir / np.linalg.norm(transverse_dir)
+            
+            F_N = T * 1000.0 * transverse_dir 
+            extFT.extForce_N = [[F_N[0]], [F_N[1]], [F_N[2]]]
+        
+        dt = updateInterval * macros.NANO2SEC
+        dm = -T / (I_sp * g_0) * dt
+        scObj.hub.mHub = max(10.0, m_cur + dm)
+
+        current_time += updateInterval
+        
+        if (current_time * macros.NANO2SEC) % 14400 == 0: 
+            hours = (current_time * macros.NANO2SEC) / 3600
+            print(f" + T={hours:.0f} hours | Alt: {r_mag - R_E:.1f} km | Mass: {m_cur:.1f} kg")
+
+    # ------------------------------------------------------------------ #
+    # Results & Plotting
+    # ------------------------------------------------------------------ #
+    total_time_hrs = times[-1] / 3600.0
+    prop_used = m_0 - masses[-1]
+    positions = np.array(positions)
+    
+    print("\n" + "=" * 60)
+    print("SIMULATION SUMMARY")
+    print("=" * 60)
+    print(f"Final Altitude   : {altitudes[-1]:.2f} km")
+    print(f"Total Burn Time  : {total_time_hrs:.2f} hours")
+    print(f"Propellant Used  : {prop_used:.2f} kg")
+    print(f"Final Mass       : {masses[-1]:.2f} kg")
+    print(f"Final Eccentricity: {eccentricities[-1]:.4f}")
+    print("=" * 60)
+
+    if show_plots:
+        t_hours = np.array(times) / 3600.0
+        
+        # --- THE FIX: Bulletproof Side-by-Side Layout ---
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
+        
+        # Subplot 1: Trajectory (Left)
+        ax1.set_aspect("equal")
+        ax1.axis("off")
+        
+        earth_circle = Circle((0, 0), R_E, ec="none", fc="#2b8cbe", zorder=2)
+        ax1.add_patch(earth_circle)
+        ax1.annotate("Earth", xy=(0, 0), ha="center", va="center", color="white", fontsize=12, fontweight='bold', zorder=3)
+        
+        leo_circle = Circle((0, 0), r_init, ec="grey", fc="none", lw=1, ls=":", zorder=1)
+        geo_circle = Circle((0, 0), r_final, ec="#e6550d", fc="none", lw=2, ls="--", zorder=1)
+        ax1.add_patch(leo_circle)
+        ax1.add_patch(geo_circle)
+        
+        ax1.plot(positions[:, 0], positions[:, 1], color="#31a354", lw=1.5, alpha=0.8, label="Transverse Spiral")
+        ax1.set_title("LEO to GEO Transverse Spiral", fontsize=14, fontweight="bold")
+        ax1.legend(loc="upper right")
+        
+        # Subplot 2: Altitude vs Time (Center)
+        ax2.plot(t_hours, altitudes, color="#3182bd", lw=2)
+        ax2.axhline(y=a_final, color="#e6550d", ls="--", label="Target GEO Altitude")
+        ax2.set_xlabel("Time (Hours)", fontweight="bold")
+        ax2.set_ylabel("Altitude (km)", fontweight="bold")
+        ax2.set_title("Orbit Raising Over Time", fontweight="bold")
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+        
+        # Subplot 3: Mass vs Time (Right)
+        ax3.plot(t_hours, masses, color="#e6550d", lw=2)
+        ax3.set_xlabel("Time (Hours)", fontweight="bold")
+        ax3.set_ylabel("Spacecraft Mass (kg)", fontweight="bold")
+        ax3.set_title("Propellant Depletion", fontweight="bold")
+        ax3.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.show()
+
+if __name__ == "__main__":
+    run_spiral()
